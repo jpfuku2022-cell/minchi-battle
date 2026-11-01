@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>MINCHI CLASH</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#11182d;color:#fff;font-family:system-ui,sans-serif;touch-action:none}
+canvas{display:block;width:100vw;height:100vh;background:#25375a;image-rendering:pixelated}
+#hud{position:fixed;top:8px;left:8px;right:8px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
+.panel{background:#101326dd;border:2px solid #8195c8;border-radius:10px;padding:7px 10px;font-size:13px;font-weight:800}
+#help{position:fixed;top:53px;left:50%;transform:translateX(-50%);font-size:11px;text-shadow:1px 2px #000;white-space:nowrap;pointer-events:none}
+#controls{position:fixed;bottom:12px;left:12px;right:12px;display:flex;justify-content:space-between;align-items:end;pointer-events:none}
+.pad,.actions{display:flex;gap:7px;pointer-events:auto}
+button{min-width:51px;height:52px;border:2px solid #dce6ff;border-radius:13px;background:#293b6beF;color:white;font-size:17px;font-weight:900;touch-action:none}
+button:active{background:#617bb8;transform:translateY(2px)}
+#overlay{position:fixed;inset:0;background:#080d1deF;display:flex;align-items:center;justify-content:center;padding:18px}
+.card{width:min(520px,100%);background:#1b2545;border:3px solid #8195d3;border-radius:18px;padding:22px;text-align:center}
+h1{margin:0;color:#ffdf74;font-size:clamp(32px,8vw,52px);text-shadow:3px 4px #8e3b52}
+p{line-height:1.65;color:#e3eaff}select{padding:9px;border-radius:8px;background:#101326;color:white;border:1px solid #899bd2;font-size:15px}
+#start{height:auto;padding:12px 25px;background:#a34e76}
+.note{font-size:11px;color:#b9c7ee}
+@media(min-width:850px){#controls{opacity:.7}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"><div class="panel" id="state">MINCHI CLASH</div><div class="panel" id="stocks">YOU：♥ ♥ ♥</div></div>
+<div id="help">← → 移動 / ↑ ジャンプ / Z パンチ / X キック / C ガード / Shift ダッシュ</div>
+<div id="controls">
+ <div class="pad"><button data-key="left">◀</button><button data-key="right">▶</button><button data-key="jump">▲</button></div>
+ <div class="actions"><button data-key="guard">守</button><button data-key="punch">拳</button><button data-key="kick">蹴</button><button data-key="dash">速</button></div>
+</div>
+<div id="overlay"><div class="card">
+<h1 id="title">MINCHI CLASH</h1>
+<p id="message">ミンチ族のミンチにしまーす大乱闘！<br>CPU3体と戦うバトル試作版。</p>
+<p>キャラクター<br><select id="fighter">
+<option value="minchi">ミンチ族（バランス）</option><option value="ki">KIちがい族（高速・吹っ飛びやすい）</option><option value="dash">ダッシュ族</option><option value="power">パワー族</option><option value="magic">マジック族</option><option value="ninja">忍者族</option><option value="ice">氷族</option><option value="fire">炎族</option>
+</select></p>
+<button id="start">バトル開始！</button>
+<p class="note">PC：矢印キー / Z パンチ / X キック / C ガード / Shift ダッシュ<br>iPad：画面下のボタンで操作<br>ダメージ100%でK.O.、ストックが0になると脱落。</p>
+</div></div>
+<script>
+(()=>{
+const cv=document.getElementById('game'),c=cv.getContext('2d');
+let W=960,H=540,scale=1,players=[],effects=[],meat=[],frame=0,started=false,ended=false;
+const keys={left:false,right:false,jump:false,punch:false,kick:false,guard:false,dash:false};
+const meatPhoto=new Image();meatPhoto.src='IMG_0113.jpeg';
+const types={
+ minchi:{name:'ミンチ族',color:'#f4bd55',speed:3.1,weight:1,power:1},
+ ki:{name:'KIちがい族',color:'#b7e66b',speed:5.1,weight:.62,power:.9,beast:true},
+ dash:{name:'ダッシュ族',color:'#58d8e8',speed:4.4,weight:.82,power:.95},
+ power:{name:'パワー族',color:'#e87558',speed:2.5,weight:1.35,power:1.45},
+ magic:{name:'マジック族',color:'#b88af2',speed:3.4,weight:.92,power:1.05},
+ ninja:{name:'忍者族',color:'#7884bd',speed:4.2,weight:.8,power:1.05},
+ ice:{name:'氷族',color:'#9be4ff',speed:2.9,weight:1.2,power:.95},
+ fire:{name:'炎族',color:'#ff8955',speed:3.6,weight:.9,power:1.2}
+};
+function resize(){const d=Math.min(devicePixelRatio||1,2);cv.width=innerWidth*d;cv.height=innerHeight*d;scale=Math.min(cv.width/W,cv.height/H);c.setTransform(scale,0,0,scale,(cv.width-W*scale)/2,(cv.height-H*scale)/2)}
+addEventListener('resize',resize);resize();
+const floor=438,plats=[{x:130,y:340,w:190},{x:390,y:285,w:180},{x:640,y:340,w:190}];
+function make(type,x,y,id,bot){return{type,x,y,vx:0,vy:0,id,bot,face:id===0?1:-1,stocks:3,damage:0,ground:false,attack:0,attackType:'punch',cool:0,stun:0,guard:0,alive:true,ai:Math.random()*100,hitLock:0}}
+function start(){const t=document.getElementById('fighter').value;players=[make(t,260,350,0,false),make('ki',650,350,1,true),make('power',460,220,2,true),make('ninja',760,350,3,true)];effects=[];meat=[];frame=0;ended=false;started=true;document.getElementById('overlay').style.display='none';}
+document.getElementById('start').onclick=start;
+function attack(p,type){if(!p.alive||p.cool>0||p.attack>0)return;p.attack=type==='kick'?17:12;p.attackType=type;p.cool=type==='kick'?34:24}
+function ko(p){if(!p.alive||p.hitLock>0)return;p.hitLock=60;p.stocks--;meat.push({x:p.x,y:floor-4,t:300});effects.push({x:p.x,y:p.y-35,t:45,text:'K.O.!'});p.damage=0;p.attack=0;p.vx=0;p.vy=0;
+ if(p.stocks<=0){p.alive=false;effects.push({x:p.x,y:p.y-60,t:60,text:'OUT!'});}
+ else{p.x=100+Math.random()*760;p.y=160;p.stun=55;p.invuln=90;}
+}
+function hurt(target,attacker){if(!target.alive||target.invuln>0||target.hitLock>0)return;if(target.guard>0){target.vx+=attacker.face*1.2;return}
+ const amount=(attacker.attackType==='kick'?13:8)*types[attacker.type].power;
+ target.damage=Math.min(100,target.damage+amount);target.stun=16;
+ target.vx=attacker.face*(4.8+target.damage*.075)/types[target.type].weight;
+ target.vy=-3-target.damage*.025;
+ effects.push({x:target.x,y:target.y-30,t:22,text:'+'+Math.round(amount)+'%'});attacker.attack=0;
+ if(target.damage>=100)ko(target);
+}
+function update(){
+ if(!started||ended)return;frame++;
+ for(const p of players){if(!p.alive)continue;
+  p.cool=Math.max(0,p.cool-1);p.attack=Math.max(0,p.attack-1);p.stun=Math.max(0,p.stun-1);p.hitLock=Math.max(0,p.hitLock-1);p.invuln=Math.max(0,p.invuln-1);p.guard=0;
+  if(p.bot){const target=players.filter(q=>q!==p&&q.alive).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+   if(target){const dx=target.x-p.x;p.face=Math.sign(dx)||p.face;if(Math.abs(dx)>55)p.vx+=Math.sign(dx)*.24;if(Math.abs(dx)<82&&Math.abs(target.y-p.y)<65&&Math.random()<.09)attack(p,Math.random()<.42?'kick':'punch');if(p.ground&&Math.random()<.014)p.vy=-9.5;if(Math.random()<.006)p.guard=5}
+  }else if(p.stun===0){if(keys.left){p.vx-=.65;p.face=-1}if(keys.right){p.vx+=.65;p.face=1}if(keys.jump&&p.ground)p.vy=-10.5;if(keys.punch)attack(p,'punch');if(keys.kick)attack(p,'kick');if(keys.guard)p.guard=2;if(keys.dash&&p.cool===0){p.vx=p.face*9;p.cool=55}}
+  if(p.stun===0||p.bot){p.vx*=p.guard?.75:.84;p.vx=Math.max(-8,Math.min(8,p.vx))}
+  p.vy+=.48;p.x+=p.vx;p.y+=p.vy;p.ground=false;
+  if(p.y+26>=floor&&p.x>20&&p.x<W-20){p.y=floor-26;p.vy=0;p.ground=true}
+  for(const q of plats){if(p.vy>=0&&p.x>q.x&&p.x<q.x+q.w&&p.y+26>=q.y&&p.y+26-p.vy<q.y+5){p.y=q.y-26;p.vy=0;p.ground=true}}
+  if(p.x< -25||p.x>W+25||p.y>H+40)ko(p);
+ }
+ // Attack hit detection: only resolve active attacks, and never dereference a missing target.
+ for(const a of players){if(!a.alive||a.attack<7)continue;for(const b of players){if(a===b||!b.alive)continue;const dx=b.x-a.x;if(Math.sign(dx)===a.face&&Math.abs(dx)<(a.attackType==='kick'?82:62)&&Math.abs(b.y-a.y)<48){hurt(b,a);break}}}
+ effects=effects.filter(e=>--e.t>0);meat=meat.filter(m=>--m.t>0);
+ const alive=players.filter(p=>p.alive);document.getElementById('stocks').textContent='YOU：'+'♥ '.repeat(Math.max(0,players[0]?.stocks||0))+'　'+Math.round(players[0]?.damage||0)+'%';
+ document.getElementById('state').textContent='生存 '+alive.length+' / 4　｜　'+Math.floor(frame/60)+'秒';
+ if(alive.length<=1){ended=true;setTimeout(()=>{document.getElementById('overlay').style.display='flex';document.getElementById('title').textContent=players[0].alive?'WINNER!':'TRY AGAIN';document.getElementById('message').textContent=players[0].alive?'優勝！最後まで生き残った！':'今回は惜しかった！再挑戦しよう！';document.getElementById('start').textContent='もう一度プレイ'},450)}
+}
+function draw(){
+ c.clearRect(0,0,W,H);const g=c.createLinearGradient(0,0,0,H);g.addColorStop(0,'#24335b');g.addColorStop(1,'#536d86');c.fillStyle=g;c.fillRect(0,0,W,H);
+ c.fillStyle='#a9c1d1';for(let i=0;i<7;i++){let x=(i*173-frame*.25%1100+1100)%1100-70;c.fillRect(x,90+(i%3)*34,75,12);c.fillRect(x+14,78+(i%3)*34,40,12)}
+ c.fillStyle='#263d45';c.fillRect(0,floor,W,H-floor);c.fillStyle='#78a96b';c.fillRect(0,floor,W,10);
+ plats.forEach(q=>{c.fillStyle='#bd9862';c.fillRect(q.x,q.y,q.w,16);c.fillStyle='#e4c58b';c.fillRect(q.x,q.y,q.w,4)});
+ meat.forEach(m=>{if(meatPhoto.complete&&meatPhoto.naturalWidth){c.save();c.globalAlpha=Math.min(1,m.t/30);c.drawImage(meatPhoto,m.x-38,m.y-34,76,48);c.restore()}else{c.fillStyle='#ef8d91';c.fillRect(m.x-16,m.y-7,32,10)}});
+ for(const p of players){if(!p.alive)continue;const r=types[p.type],x=Math.round(p.x),y=Math.round(p.y);c.save();c.translate(x,y);c.scale(p.face,1);c.globalAlpha=p.invuln>0&&Math.floor(frame/5)%2===0?.4:1;
+  if(r.beast){c.fillStyle=r.color;c.fillRect(-20,-18,35,17);c.fillRect(-13,-8,26,20);c.fillRect(-18,8,9,17);c.fillRect(5,8,9,17);c.fillRect(11,-26,7,11);c.fillRect(-15,-26,7,11);c.fillStyle='#273022';c.fillRect(7,-14,4,4);c.fillRect(18,-8,8,5)}
+  else{c.fillStyle=r.color;c.fillRect(-12,-26,24,25);c.fillRect(-10,-2,8,27);c.fillRect(2,-2,8,27);c.fillRect(-18,-22,7,20);c.fillRect(11,-22,7,20);c.fillStyle='#fff';c.fillRect(2,-20,5,5);c.fillStyle='#20243c';c.fillRect(5,-19,2,3)}
+  if(p.guard>0){c.strokeStyle='#9deaff';c.lineWidth=3;c.strokeRect(-23,-33,46,62)}
+  if(p.attack>0){c.fillStyle=p.attackType==='kick'?'#ffcf6a':'#fff2a8';c.fillRect(12,-17,p.attackType==='kick'?37:27,8)}
+  c.restore();
+  c.fillStyle='#101326';c.fillRect(x-24,y-45,48,6);c.fillStyle=p.damage>=75?'#ff554f':p.id===0?'#ffe17a':'#ff9a72';c.fillRect(x-24,y-45,48*Math.min(1,p.damage/100),6);
+  c.font='11px system-ui';c.textAlign='center';c.fillStyle='white';c.fillText((p.id===0?'YOU ':r.name)+' '+Math.round(p.damage)+'%',x,y-51);
+ }
+ for(const e of effects){c.globalAlpha=Math.min(1,e.t/12);c.fillStyle='#fff3a6';c.font='bold 16px system-ui';c.textAlign='center';c.fillText(e.text,e.x,e.y-e.t*.5);c.globalAlpha=1}
+}
+function loop(){update();draw();requestAnimationFrame(loop)}loop();
+const keymap={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'jump',z:'punch',x:'kick',c:'guard',Shift:'dash'};
+addEventListener('keydown',e=>{const k=keymap[e.key];if(k){keys[k]=true;e.preventDefault()}});
+addEventListener('keyup',e=>{const k=keymap[e.key];if(k)keys[k]=false});
+document.querySelectorAll('[data-key]').forEach(b=>{const k=b.dataset.key;const down=e=>{e.preventDefault();keys[k]=true},up=e=>{e.preventDefault();keys[k]=false};b.addEventListener('pointerdown',down);['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,up))});
+document.getElementById('start').onclick=start;
+})();
+</script>
+</body>
+</html>
